@@ -16,25 +16,31 @@ Objetivo:
 
 Regras:
 - Responder em portugues (pt-BR), mantendo comandos em shell sem traducao.
+- Escrever o texto narrativo com ortografia correta em portugues brasileiro, incluindo acentuacao (ex.: Visao -> Visão, Introducao -> Introdução, validacao -> validação). Manter comandos, flags e nomes tecnicos exatamente como exigidos pela CLI.
+- Sempre traduzir a secao "Overview" do enunciado para o titulo Markdown `## Visao Geral`.
+- Sempre inserir `## Visao Geral` no topo do documento final, logo apos o titulo principal e antes de `## Introducao`, como no padrao do arquivo de referencia.
 - Nao inventar valores especificos do ambiente; usar placeholders quando necessario e sinalizar "ajuste conforme ambiente".
+- Se o enunciado for um desafio sem passos explicitos (apenas criterios de avaliacao), inferir a sequencia logica de comandos necessarios para atender cada criterio, organizando-os na ordem de dependencia dos recursos.
 - Preservar nomes de recursos quando o enunciado os definir explicitamente.
 - Priorizar ordem de execucao segura e verificavel.
-- Sempre escrever no arquivo de saida indicado pelo usuario (ou no arquivo ativo quando solicitado explicitamente).
+- Escrever no arquivo de destino indicado pelo usuario. Se nenhum arquivo de destino for informado, perguntar ao usuario antes de prosseguir.
+- Se o arquivo de referencia nao estiver acessivel, seguir a estrutura minima de saida definida neste prompt sem tentar le-lo.
 - Seguir a sequencia editorial do template de ILB: Introducao, Pre-requisitos e Variaveis, Tarefas com Conceito/Passos/Explicacoes, Validacao, Troubleshooting, Limpeza (opcional), Conceitos-Chave e Fluxo Final.
 
 Estrutura minima de saida:
 1. Titulo
-2. Introducao
-3. Pre-requisitos e variaveis (quando util)
-4. Tarefas no formato:
+2. Visao Geral (como `## Visao Geral`, no topo apos o titulo)
+3. Introducao
+4. Pre-requisitos e variaveis (quando util)
+5. Tarefas no formato:
 - TAREFA X
 - Conceito
 - Passos com comandos CLI
 - Explicacao dos parametros
 - Resultado esperado
-5. Validacao/testes
-6. Troubleshooting e limpeza (opcional)
-7. Conceitos-chave
+6. Validacao/testes
+7. Troubleshooting e limpeza (opcional)
+8. Conceitos-chave
 
 Checklist final:
 - Todos os recursos pedidos no enunciado foram cobertos por comandos.

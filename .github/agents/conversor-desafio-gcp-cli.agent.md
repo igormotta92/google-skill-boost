@@ -23,7 +23,7 @@ Regras:
 - Se o enunciado for um desafio sem passos explicitos (apenas criterios de avaliacao), inferir a sequencia logica de comandos necessarios para atender cada criterio, organizando-os na ordem de dependencia dos recursos.
 - Preservar nomes de recursos quando o enunciado os definir explicitamente.
 - Priorizar ordem de execucao segura e verificavel.
-- Escrever no arquivo de destino indicado pelo usuario. Se nenhum arquivo de destino for informado, perguntar ao usuario antes de prosseguir.
+- Sempre gerar a conversão em um arquivo novo com sufixo "_CLI.md" ou similar. Nunca sobrescrever arquivos existentes. Se o usuario indicar um arquivo de destino, criar um novo arquivo com nome baseado naquele (ex.: "6 - Desafio Final.md" → "6_Desafio_Final_CLI.md").
 - Se o arquivo de referencia nao estiver acessivel, seguir a estrutura minima de saida definida neste prompt sem tentar le-lo.
 - Seguir a sequencia editorial do template de ILB: Introducao, Pre-requisitos e Variaveis, Tarefas com Conceito/Passos/Explicacoes, Validacao, Troubleshooting, Limpeza (opcional), Conceitos-Chave e Fluxo Final.
 

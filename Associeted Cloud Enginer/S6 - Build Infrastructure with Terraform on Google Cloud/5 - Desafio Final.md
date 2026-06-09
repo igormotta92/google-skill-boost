@@ -29,12 +29,12 @@ Antes de começar, defina as variáveis de ambiente no Cloud Shell para facilita
 
 ```bash
 # Ajuste conforme ambiente
-export PROJECT_ID="SEU_PROJECT_ID"
-export REGION="us-central1"
-export ZONE="us-central1-a"
-export BUCKET_NAME="NOME_DO_BUCKET_FORNECIDO_PELO_LAB"
-export VPC_NAME="NOME_DA_VPC_FORNECIDO_PELO_LAB"
-export INSTANCE_3_NAME="NOME_DA_INSTANCIA_FORNECIDO_PELO_LAB"
+export PROJECT_ID="qwiklabs-gcp-04-349113cfcef6"
+export REGION="us-west4"
+export ZONE="us-west4-a"
+export BUCKET_NAME="tf-bucket-630475"
+export VPC_NAME="tf-vpc-637584"
+export INSTANCE_3_NAME="tf-instance-232342"
 ```
 
 > **Atenção:** Os valores de `BUCKET_NAME`, `VPC_NAME` e `INSTANCE_3_NAME` são fornecidos pelo sistema do lab no momento do início. Consulte o painel lateral do lab para obtê-los.
@@ -78,20 +78,20 @@ touch modules/storage/storage.tf \
 ### Passo 2: Preencher o `variables.tf` raiz
 
 ```bash
-cat > variables.tf << 'EOF'
+cat > variables.tf << EOF
 variable "region" {
   description = "Região do Google Cloud"
-  default     = "us-central1"
+  default     = "$REGION"
 }
 
 variable "zone" {
   description = "Zona do Google Cloud"
-  default     = "us-central1-a"
+  default     = "$ZONE"
 }
 
 variable "project_id" {
   description = "ID do projeto no Google Cloud"
-  default     = "SEU_PROJECT_ID"
+  default     = "$PROJECT_ID"
 }
 EOF
 ```
@@ -108,20 +108,20 @@ Os dois módulos precisam das mesmas três variáveis. Execute para cada um:
 
 ```bash
 for MOD in modules/instances modules/storage; do
-cat > $MOD/variables.tf << 'EOF'
+cat > $MOD/variables.tf << EOF
 variable "region" {
   description = "Região do Google Cloud"
-  default     = "us-central1"
+  default     = "$REGION"
 }
 
 variable "zone" {
   description = "Zona do Google Cloud"
-  default     = "us-central1-a"
+  default     = "$ZONE"
 }
 
 variable "project_id" {
   description = "ID do projeto no Google Cloud"
-  default     = "SEU_PROJECT_ID"
+  default     = "$PROJECT_ID"
 }
 EOF
 done
@@ -281,19 +281,25 @@ EOF
 
 ### Passo 5: Importar as instâncias para o estado do Terraform
 
-Substitua `INSTANCE_1_ID` e `INSTANCE_2_ID` pelos IDs numéricos obtidos no Passo 1:
-
 ```bash
+INSTANCE_1_ID=$(gcloud compute instances describe tf-instance-1 --zone=$ZONE --format='value(id)')
+INSTANCE_2_ID=$(gcloud compute instances describe tf-instance-2 --zone=$ZONE --format='value(id)')
+
+# Por ID da instância
+terraform import module.instances.google_compute_instance.tf-instance-1 $INSTANCE_1_ID
+terraform import module.instances.google_compute_instance.tf-instance-2 $INSTANCE_2_ID
+
+# Por Nome da instância
 terraform import module.instances.google_compute_instance.tf-instance-1 \
-    $ZONE/tf-instance-1
+    $DEVSHELL_PROJECT_ID/$ZONE/tf-instance-1
 
 terraform import module.instances.google_compute_instance.tf-instance-2 \
-    $ZONE/tf-instance-2
+    $DEVSHELL_PROJECT_ID/$ZONE/tf-instance-2
 ```
 
 **Explicação dos parâmetros:**
 - `module.instances.google_compute_instance.tf-instance-1`: endereço do recurso no estado Terraform seguindo o padrão `module.<nome_modulo>.<tipo_recurso>.<nome_recurso>`.
-- `$ZONE/tf-instance-1`: identificador do recurso no Google Cloud no formato `zona/nome-da-instancia`.
+- `$DEVSHELL_PROJECT_ID/$ZONE/tf-instance-1`: identificador do recurso no Google Cloud no formato `projeto/zona/nome-da-instancia`. O formato `zona/nome` (sem projeto) causa erro no provider — o projeto é obrigatório.
 
 **Resultado esperado:** Mensagens `Import successful!` para cada instância.
 
@@ -319,9 +325,9 @@ Por padrão, o Terraform armazena o estado localmente em `terraform.tfstate`. Um
 Substitua `$BUCKET_NAME` pelo nome fornecido pelo lab:
 
 ```bash
-cat > modules/storage/storage.tf << 'EOF'
+cat > modules/storage/storage.tf << EOF
 resource "google_storage_bucket" "storage" {
-  name                        = "NOME_DO_BUCKET_FORNECIDO_PELO_LAB"
+  name                        = "$BUCKET_NAME"
   location                    = "US"
   force_destroy               = true
   uniform_bucket_level_access = true
@@ -430,7 +436,7 @@ O Terraform aplica mudanças incrementais: ao alterar um atributo como `machine_
 Modifique as instâncias existentes para `e2-standard-2` e adicione a terceira instância. Substitua `NOME_DA_INSTANCIA_FORNECIDO_PELO_LAB` pelo valor do lab:
 
 ```bash
-cat > modules/instances/instances.tf << 'EOF'
+cat > modules/instances/instances.tf << EOF
 resource "google_compute_instance" "tf-instance-1" {
   name         = "tf-instance-1"
   machine_type = "e2-standard-2"
@@ -476,7 +482,7 @@ resource "google_compute_instance" "tf-instance-2" {
 }
 
 resource "google_compute_instance" "tf-instance-3" {
-  name         = "NOME_DA_INSTANCIA_FORNECIDO_PELO_LAB"
+  name         = "$INSTANCE_3_NAME"
   machine_type = "e2-standard-2"
   zone         = var.zone
 
@@ -553,14 +559,14 @@ O Terraform Registry hospeda módulos comunitários e oficiais reutilizáveis. O
 Substitua `NOME_DA_VPC_FORNECIDO_PELO_LAB` pelo nome fornecido pelo lab:
 
 ```bash
-cat >> main.tf << 'EOF'
+cat >> main.tf << EOF
 
 module "vpc" {
   source  = "terraform-google-modules/network/google"
   version = "10.0.0"
 
   project_id   = var.project_id
-  network_name = "NOME_DA_VPC_FORNECIDO_PELO_LAB"
+  network_name = "$VPC_NAME"
   routing_mode = "GLOBAL"
 
   subnets = [
@@ -602,7 +608,7 @@ terraform apply -auto-approve
 Atualize `modules/instances/instances.tf` adicionando `subnetwork` e alterando `network` em cada instância. Substitua `NOME_DA_VPC_FORNECIDO_PELO_LAB` pelo nome real:
 
 ```bash
-cat > modules/instances/instances.tf << 'EOF'
+cat > modules/instances/instances.tf << EOF
 resource "google_compute_instance" "tf-instance-1" {
   name         = "tf-instance-1"
   machine_type = "e2-standard-2"
@@ -615,7 +621,7 @@ resource "google_compute_instance" "tf-instance-1" {
   }
 
   network_interface {
-    network    = "NOME_DA_VPC_FORNECIDO_PELO_LAB"
+    network    = "$VPC_NAME"
     subnetwork = "subnet-01"
   }
 
@@ -638,7 +644,7 @@ resource "google_compute_instance" "tf-instance-2" {
   }
 
   network_interface {
-    network    = "NOME_DA_VPC_FORNECIDO_PELO_LAB"
+    network    = "$VPC_NAME"
     subnetwork = "subnet-02"
   }
 
@@ -676,17 +682,17 @@ Regras de firewall no Google Cloud controlam o tráfego de entrada (ingress) e s
 Para obter o `self_link` da rede VPC criada pelo módulo, use:
 
 ```bash
-terraform state show module.vpc.google_compute_network.network | grep self_link
+terraform state show module.vpc.module.vpc.google_compute_network.network | grep self_link
 ```
 
 O valor terá o formato `projects/PROJECT_ID/global/networks/NOME_DA_VPC`. Adicione a regra ao `main.tf`:
 
 ```bash
-cat >> main.tf << 'EOF'
+cat >> main.tf << EOF
 
 resource "google_compute_firewall" "tf-firewall" {
   name    = "tf-firewall"
-  network = "projects/SEU_PROJECT_ID/global/networks/NOME_DA_VPC_FORNECIDO_PELO_LAB"
+  network = "projects/$PROJECT_ID/global/networks/$VPC_NAME"
 
   allow {
     protocol = "tcp"
@@ -729,12 +735,12 @@ Execute os comandos abaixo para verificar o estado final de todos os recursos cr
 gcloud compute instances list --project=$PROJECT_ID
 
 # Verificar detalhes da VPC
-gcloud compute networks describe NOME_DA_VPC_FORNECIDO_PELO_LAB \
+gcloud compute networks describe $VPC_NAME \
     --project=$PROJECT_ID
 
 # Listar sub-redes da VPC
 gcloud compute networks subnets list \
-    --filter="network:NOME_DA_VPC_FORNECIDO_PELO_LAB" \
+    --filter="network:$VPC_NAME" \
     --project=$PROJECT_ID
 
 # Verificar a regra de firewall

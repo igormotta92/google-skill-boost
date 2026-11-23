@@ -6,28 +6,28 @@ Este runbook cria uma Cloud Function Gen2 que:
 3. Publica o nome do thumbnail em um topico Pub/Sub.
 
 Fluxo sugerido de execucao:
-1. Definir variaveis e preparar recursos base.
-2. Criar o codigo da funcao e dependencias.
-3. Aplicar IAM minimo.
-4. Fazer deploy, validar e testar ponta a ponta.
-5. Executar validacoes finais e limpeza opcional.
+1. Definir variaveis e ativar APIs.
+2. Criar bucket e topico (Tasks 1 e 2).
+3. Criar o codigo da funcao, fazer deploy e testar (Task 3).
+4. Remover o engenheiro anterior (Task 4).
+5. Executar validacoes finais.
+
+> **IAM restrito no lab:** o usuario `student` nao pode criar service accounts nem conceder papeis (apenas mexer em `roles/viewer`). As permissoes que a funcao precisa ja vem pre-concedidas pelo lab, por isso o deploy usa a Compute default SA, sem SA customizada.
 
 ## 0) Variaveis e contexto
 
 ```bash
-export PROJECT_ID="qwiklabs-gcp-01-00b8f77fd3a5"
+export PROJECT_ID=$DEVSHELL_PROJECT_ID
 gcloud config set project "$PROJECT_ID"
 export PROJECT_NUMBER="$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')"
 
-export REGION="europe-west3"
-export ZONE="europe-west3-b"
-export TOPIC_NAME="topic-memories-492"
-export FUNCTION_NAME="memories-thumbnail-generator"
+export REGION="us-central1"
+export TOPIC_NAME="topic-memories-303"
+export FUNCTION_NAME="memories-thumbnail-creator"
 
 export ENTRY_POINT=${FUNCTION_NAME}
-export SA_FUNCTION="cloudfunctionsa@${PROJECT_ID}.iam.gserviceaccount.com"
 export BUCKET_INPUT="${PROJECT_ID}-bucket"
-export BUCKET_STAGE="${PROJECT_ID}-stage"
+export OLD_ENGINEER="student-01-b7ea4fe32e69@qwiklabs.net"
 ```
 
 ## 1) Ativar APIs necessarias
@@ -41,20 +41,18 @@ gcloud services enable \
   eventarc.googleapis.com \
   pubsub.googleapis.com \
   storage.googleapis.com
-
-  # Garante APIs
-# gcloud services enable storage.googleapis.com pubsub.googleapis.com eventarc.googleapis.com
 ```
 
-## 2) Criar buckets e topico
+## 2) Criar bucket e topico (Tasks 1 e 2)
+
+Bucket regional em `us-central1` e topico Pub/Sub usado pela funcao.
 
 ```bash
-gcloud storage buckets create "gs://${BUCKET_STAGE}" --location="${REGION}"
 gcloud storage buckets create "gs://${BUCKET_INPUT}" --location="${REGION}"
 gcloud pubsub topics create "${TOPIC_NAME}"
 ```
 
-## 3) Criar projeto da funcao
+## 3) Criar projeto da funcao (Task 3)
 
 Crie o diretorio da funcao e entre nele para manter os arquivos isolados.
 
@@ -174,83 +172,9 @@ EOF
 npm install
 ```
 
-## 4) Criar service account da funcao
+## 4) Deploy da Cloud Function Gen2
 
-Conta de servico usada no runtime da Cloud Function.
-
-```bash
-gcloud iam service-accounts create cloudfunctionsa \
-  --display-name="Cloud Functions Runtime Service Account"
-```
-
-## 5) Permissoes IAM (minimo recomendado)
-
-Aplicar na ordem abaixo para reduzir falhas durante criacao de trigger e execucao.
-
-### 5.1 Runtime SA escreve no bucket de entrada
-
-```bash
-gcloud storage buckets add-iam-policy-binding "gs://${BUCKET_INPUT}" \
-  --member="serviceAccount:${SA_FUNCTION}" \
-  --role="roles/storage.objectAdmin"
-```
-
-### 5.2 Runtime SA publica no topico
-
-```bash
-gcloud pubsub topics add-iam-policy-binding "${TOPIC_NAME}" \
-  --project="${PROJECT_ID}" \
-  --member="serviceAccount:${SA_FUNCTION}" \
-  --role="roles/pubsub.publisher"
-```
-
-### 5.3 Runtime SA recebe eventos do Eventarc
-
-```bash
-gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
-  --member="serviceAccount:${SA_FUNCTION}" \
-  --role="roles/eventarc.eventReceiver"
-```
-
-### 5.4 Cloud Storage Service Agent publica eventos
-
-Necessario para eventos de Cloud Storage chegarem via Pub/Sub/Eventarc.
-
-```bash
-gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
-  --member="serviceAccount:service-${PROJECT_NUMBER}@gs-project-accounts.iam.gserviceaccount.com" \
-  --role="roles/pubsub.publisher"
-```
-
-Caso de problema no bind da conta de serviço, será necessário forçar o GCP a criar novamente o SA de serviço so Storage
-```bash
-gcloud storage service-agent --project=${PROJECT_NUMBER}
-```
-
-### 5.5 (Opcional) Eventarc receiver para a Compute default SA
-
-Em alguns ambientes (org policies mais restritivas), o trigger so cria se esta permissao existir:
-
-```bash
-gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
-  --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
-  --role="roles/eventarc.eventReceiver"
-```
-
-### 5.6 Trigger SA pode invocar o servico (rode apos o primeiro deploy)
-
-Use esta etapa apenas quando necessaria no seu ambiente/politica.
-
-```bash
-gcloud run services add-iam-policy-binding "${FUNCTION_NAME}" \
-  --region="${REGION}" \
-  --member="serviceAccount:${SA_FUNCTION}" \
-  --role="roles/run.invoker"
-```
-
-## 6) Deploy da Cloud Function Gen2
-
-Deploy da funcao Gen2 com trigger por bucket e conta de servico dedicada.
+Deploy com trigger por bucket usando a Compute default SA (`${PROJECT_NUMBER}-compute@developer.gserviceaccount.com`) para runtime e trigger. Rode de dentro do diretorio `${FUNCTION_NAME}`.
 
 ```bash
 gcloud functions deploy "${FUNCTION_NAME}" \
@@ -259,36 +183,34 @@ gcloud functions deploy "${FUNCTION_NAME}" \
   --region="${REGION}" \
   --source=. \
   --entry-point="${ENTRY_POINT}" \
-  --trigger-bucket="${BUCKET_INPUT}" \
-  --trigger-service-account="${SA_FUNCTION}" \
-  --stage-bucket="${BUCKET_STAGE}" \
-  --service-account="${SA_FUNCTION}" \
-  --set-env-vars="TOPIC_NAME=${TOPIC_NAME},ENTRY_POINT=${ENTRY_POINT}"
+  --trigger-bucket="${BUCKET_INPUT}"
 ```
 
-Observacao: `--allow-unauthenticated` nao se aplica para trigger por bucket (evento), entao foi removido.
+Se falhar com erro de permissao do Eventarc / service agent ("it may take a few minutes before all necessary permissions are propagated"), aguarde 2-5 minutos e rode o mesmo comando novamente. Persistindo, crie a funcao pelo Console (Cloud Run > Write a function), que oferece botao para conceder os papeis faltantes.
 
-## 7) Teste fim a fim
+Observacao: `--allow-unauthenticated` nao se aplica para trigger por bucket (evento).
 
-Upload de arquivo de teste e validacao de logs/artefatos gerados.
+## 5) Teste fim a fim
+
+Upload de arquivo de teste. Para o "Check my progress" basta o upload; nao precisa esperar o thumbnail.
 
 ```bash
 curl -L -o map.jpg https://storage.googleapis.com/cloud-training/gsp315/map.jpg
 gcloud storage cp map.jpg "gs://${BUCKET_INPUT}"
 ```
 
-Verificar log
+Verificar log:
 
 ```bash
-# old
-gcloud run services logs read ${FUNCTION_NAME} \
-  --region=${REGION} \
-  --project=${PROJECT_ID} \
-  --limit=100
-
-# gen2
 gcloud functions logs read ${FUNCTION_NAME} \
   --gen2 \
+  --region=${REGION} \
+  --project=${PROJECT_ID} \
+  --limit=50
+
+# Se a funcao foi criada pelo Console (Cloud Run > Write a function),
+# ela existe apenas como servico Cloud Run e nao aparece em `gcloud functions`:
+gcloud run services logs read ${FUNCTION_NAME} \
   --region=${REGION} \
   --project=${PROJECT_ID} \
   --limit=50
@@ -300,30 +222,34 @@ Validar se o thumbnail foi criado:
 gcloud storage ls "gs://${BUCKET_INPUT}"
 ```
 
-Opcional: criar subscription temporaria para validar mensagem Pub/Sub:
+## 6) Remover o engenheiro anterior (Task 4)
 
-```bash
-gcloud pubsub subscriptions create topic-memories-sub --topic="${TOPIC_NAME}"
-gcloud pubsub subscriptions pull topic-memories-sub --limit=1 --auto-ack
-```
-
-## 8) Removendo permissao (opcional)
-
-Use apenas se precisar remover acesso previamente concedido.
+Remove o papel `Viewer` do cloud engineer anterior. Como a policy do projeto possui bindings com condicao, o `gcloud` pede uma condicao interativamente; `--condition=None` evita o prompt.
 
 ```bash
 gcloud projects remove-iam-policy-binding "${PROJECT_ID}" \
-  --member="user:student-00-ef0210023997@qwiklabs.net" \
-  --role="roles/viewer"
+  --member="user:${OLD_ENGINEER}" \
+  --role="roles/viewer" \
+  --condition=None
 ```
 
-## 9) Comandos uteis de validacao
-
-Checklist final para confirmar estado da funcao, IAM, trigger e topico.
+Validar que o usuario nao aparece mais na policy:
 
 ```bash
-gcloud functions describe "${FUNCTION_NAME}" --gen2 --region="${REGION}"
-gcloud projects get-iam-policy "${PROJECT_ID}" --flatten="bindings[].members" --filter="bindings.members:${SA_FUNCTION}" --format="table(bindings.role)"
+gcloud projects get-iam-policy "${PROJECT_ID}" \
+  --flatten="bindings[].members" \
+  --filter="bindings.members:${OLD_ENGINEER}" \
+  --format="table(bindings.role)"
+```
+
+## 7) Comandos uteis de validacao
+
+Checklist final para confirmar estado da funcao e do trigger.
+
+```bash
+gcloud functions describe "${FUNCTION_NAME}" --gen2 --region="${REGION}" \
+  --format="value(state, serviceConfig.serviceAccountEmail, eventTrigger.eventType)"
+gcloud functions list --regions="${REGION}"
+gcloud run services list --region="${REGION}"   # funcoes criadas pelo Console aparecem aqui
 gcloud eventarc triggers list --location="${REGION}"
-gcloud pubsub topics get-iam-policy "${TOPIC_NAME}"
 ```

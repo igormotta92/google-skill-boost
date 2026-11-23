@@ -21,7 +21,8 @@ Antes de criar papeis customizados, padronize variaveis e confirme o escopo do p
 ### Passo 1: Definir regiao padrao
 
 ```bash
-gcloud config set compute/region us-central1
+export REGION="us-east1"
+gcloud config set compute/region "$REGION"
 ```
 
 ### Passo 2: Definir variaveis
@@ -44,6 +45,7 @@ gcloud config list --format="text(core.account,core.project,compute.region)"
 
 ### Explicacao dos parametros
 
+- `REGION`: regiao padrao do lab (`us-east1`).
 - `PROJECT_ID`: projeto onde as custom roles serao criadas.
 - `RESOURCE`: recurso alvo para comandos de descoberta (`list-testable-permissions` e `list-grantable-roles`).
 - `CUSTOM_ROLE_EDITOR_ID` e `CUSTOM_ROLE_VIEWER_ID`: IDs das roles customizadas no projeto.
@@ -131,10 +133,10 @@ Criar roles customizadas de duas formas: por arquivo YAML e por flags.
 
 ### Passos com comandos CLI
 
-1. Criar definicao YAML da role `editor`:
+1. Criar definicao YAML da role `editor` (na criacao nao se usa `etag` nem `name`):
 
 ```bash
-cat > role-definition.yaml <<'EOF'
+cat > role-definition.yaml <<EOF
 title: "Role Editor"
 description: "Edit access for App Versions"
 stage: "ALPHA"
@@ -143,6 +145,13 @@ includedPermissions:
 - appengine.versions.delete
 EOF
 ```
+
+Estrutura do arquivo:
+
+- `title`: nome amigavel da role.
+- `description`: descricao curta.
+- `stage`: estagio de lancamento (`ALPHA`, `BETA`, `GA`).
+- `includedPermissions`: lista de permissoes `service.resource.verb`.
 
 2. Criar role customizada via arquivo:
 
@@ -214,22 +223,37 @@ Atualizar role por YAML (com `etag`) e por flags, evitando sobrescrever alteraco
 
 ### Passos com comandos CLI
 
-1. Exportar definicao atual da role `editor`:
+1. Consultar a definicao atual da role `editor` e capturar o `etag` atual em variavel (ele muda a cada lab/alteracao; nao copie etag de exemplos):
 
 ```bash
-gcloud iam roles describe editor --project "$DEVSHELL_PROJECT_ID"
+gcloud iam roles describe "$CUSTOM_ROLE_EDITOR_ID" --project "$PROJECT_ID"
 
-gcloud iam roles describe "$CUSTOM_ROLE_EDITOR_ID" \
-	--project "$DEVSHELL_PROJECT_ID" \
-	--format=yaml > new-role-definition.yaml
+export ETAG="$(gcloud iam roles describe "$CUSTOM_ROLE_EDITOR_ID" \
+	--project "$PROJECT_ID" \
+	--format='value(etag)')"
+echo "$ETAG"
 ```
 
-2. Editar `new-role-definition.yaml` e adicionar em `includedPermissions`:
+2. Gerar `new-role-definition.yaml` com `cat`, usando as variaveis do shell e adicionando as permissoes de Storage:
 
-```text
+```bash
+cat > new-role-definition.yaml <<EOF
+description: Edit access for App Versions
+etag: ${ETAG}
+includedPermissions:
+- appengine.versions.create
+- appengine.versions.delete
 - storage.buckets.get
 - storage.buckets.list
+name: projects/${PROJECT_ID}/roles/${CUSTOM_ROLE_EDITOR_ID}
+stage: ALPHA
+title: Role Editor
+EOF
+
+cat new-role-definition.yaml
 ```
+
+Observacao: o heredoc usa `<<EOF` (sem aspas) para que `${ETAG}`, `${PROJECT_ID}` e `${CUSTOM_ROLE_EDITOR_ID}` sejam expandidos. Com `<<'EOF'` o arquivo ficaria com o texto literal das variaveis.
 
 3. Aplicar update da role `editor` via YAML:
 
@@ -249,7 +273,8 @@ gcloud iam roles update "$CUSTOM_ROLE_VIEWER_ID" \
 
 ### Explicacao dos parametros
 
-- `roles describe --format=yaml`: captura definicao completa, incluindo `etag`.
+- `roles describe --format='value(etag)'`: retorna apenas o `etag` atual da role, guardado em `ETAG`.
+- `etag: ${ETAG}`: garante que o update so e aplicado se a role nao mudou desde a leitura.
 - `roles update --file`: aplica definicao YAML atualizada.
 - `--add-permissions`: adiciona permissoes sem substituir toda a lista existente.
 
@@ -310,7 +335,7 @@ Se a role ainda estiver em uso e voce quiser fazer phase-out com orientacao para
 gcloud iam roles update "$CUSTOM_ROLE_VIEWER_ID" \
 	--project "$DEVSHELL_PROJECT_ID" \
 	--stage "DEPRECATED" \
-	--deprecation-message "Role sera removida em breve. Use projects/$DEVSHELL_PROJECT_ID/roles/editor ou consulte o runbook interno em go/iam-custom-roles"
+	--description "Role sera removida em breve. Use projects/$DEVSHELL_PROJECT_ID/roles/editor ou consulte o runbook interno em go/iam-custom-roles"
 ```
 
 Com isso, a role continua existente por um periodo de transicao, e a mensagem ajuda os consumidores a migrarem para a alternativa recomendada.

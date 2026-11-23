@@ -18,11 +18,16 @@ Este documento explica os conceitos de Load Balancing no GCP e detalha os passos
 ### Conceito
 Precisamos de múltiplas instâncias (máquinas virtuais) executando o mesmo serviço (Apache) para que o load balancer possa distribuir o tráfego entre elas.
 
+```bash
+REGION=us-east4
+ZONE=us-east4-c
+```
+
 ### Passo 1: Configurar Região e Zona Padrão
 
 ```bash
-gcloud config set compute/region asia-south1
-gcloud config set compute/zone asia-south1-a
+gcloud config set compute/region ${REGION}
+gcloud config set compute/zone ${ZONE}
 ```
 
 **Por quê?**
@@ -31,23 +36,24 @@ gcloud config set compute/zone asia-south1-a
 ### Passo 2: Criar Instância de Servidor Web (web1, web2, web3)
 
 ```bash
-# gcloud compute instances create web3 \
-# gcloud compute instances create web2 \
-gcloud compute instances create web1 \
-    --zone=asia-south1-a \
-    --tags=network-lb-tag \
-    --machine-type=e2-small \
-    --image-family=debian-12 \
-    --image-project=debian-cloud \
-    --metadata=startup-script='#!/bin/bash
-        apt-get update
-        apt-get install apache2 -y
-        service apache2 restart
-        echo "<h3>Web Server: web-number web1</h3>" | tee /var/www/html/index.html'
+for name in web1 web2 web3; do
+    gcloud compute instances create "${name}" \
+        --zone=${ZONE} \
+        --tags=network-lb-tag \
+        --machine-type=e2-small \
+        --image-family=debian-12 \
+        --image-project=debian-cloud \
+        --metadata=startup-script="#!/bin/bash
+            apt-get update
+            apt-get install apache2 -y
+            service apache2 restart
+            echo '<h3>Web Server: ${name}</h3>' | tee /var/www/html/index.html" &
+done
+wait
 ```
 
 **Explicação dos parâmetros:**
-- `--zone=asia-south1-a`: Localização da VM
+- `--zone=${ZONE}`: Localização da VM
 - `--tags=network-lb-tag`: Tag para identificar e agrupar instâncias (usada em firewall rules e load balancers)
 - `--machine-type=e2-small`: Tipo de máquina (processamento e memória)
 - `--image-family=debian-12`: Sistema operacional base
@@ -64,21 +70,21 @@ gcloud compute instances list
 **Saída esperada:**
 ```
 NAME: web1
-ZONE: asia-south1-a
+ZONE: ${ZONE}
 MACHINE_TYPE: e2-small
 INTERNAL_IP: 10.160.0.5
 EXTERNAL_IP: 34.14.162.101
 STATUS: RUNNING
 
 NAME: web2
-ZONE: asia-south1-a
+ZONE: ${ZONE}
 MACHINE_TYPE: e2-small
 INTERNAL_IP: 10.160.0.6
 EXTERNAL_IP: 34.93.207.217
 STATUS: RUNNING
 
 NAME: web3
-ZONE: asia-south1-a
+ZONE: ${ZONE}
 MACHINE_TYPE: e2-small
 INTERNAL_IP: 10.160.0.7
 EXTERNAL_IP: 35.200.197.183
@@ -118,7 +124,7 @@ Cada curl retorna `<h3>Web Server: web-number webX</h3>` (conteúdo da página H
         ↓
 [Firewall Rule: allow tcp:80 para tag network-lb-tag]
         ↓
-[GCP VPC - asia-south1-a]
+[GCP VPC - ${ZONE}]
         ↓
     web1              web2              web3
   (10.160.0.5)    (10.160.0.6)      (10.160.0.7)
@@ -140,7 +146,7 @@ Network Load Balancer (Layer 4) distribui conexões TCP/UDP entre as instâncias
 
 ```bash
 gcloud compute addresses create network-lb-ip-1 \
-  --region asia-south1
+  --region ${REGION}
 ```
 
 **Por quê?**
@@ -163,7 +169,7 @@ gcloud compute http-health-checks create basic-check
 
 ```bash
 gcloud compute target-pools create www-pool \
-  --region asia-south1 --http-health-check basic-check
+  --region ${REGION} --http-health-check basic-check
 ```
 
 **Por quê?**
@@ -186,7 +192,7 @@ gcloud compute target-pools add-instances www-pool \
 
 ```bash
 gcloud compute forwarding-rules create www-rule \
-    --region asia-south1 \
+    --region ${REGION} \
     --ports 80 \
     --address network-lb-ip-1 \
     --target-pool www-pool
@@ -201,19 +207,19 @@ gcloud compute forwarding-rules create www-rule \
 
 ```bash
 IPADDRESS=$(gcloud compute forwarding-rules describe www-rule \
-  --region asia-south1 --format="json" | jq -r .IPAddress)
+  --region ${REGION} --format="json" | jq -r .IPAddress)
 echo $IPADDRESS
 ```
 
 **Resultado esperado:**
 ```
-34.47.249.144
+34.48.214.167
 ```
 
 ### Passo 7: Testar Load Balancer
 
 ```bash
-while true; do curl -m1 34.47.249.144; done
+while true; do curl -m1 34.48.214.167; done
 ```
 
 **Por quê?**
@@ -234,7 +240,7 @@ Page served from: lb-backend-xxxxx
 ```
 [Cliente na Internet]
         ↓
-[Forwarding Rule - 34.47.249.144:80]
+[Forwarding Rule - 34.48.214.167:80]
         ↓
 [Network Load Balancer (Layer 4 - TCP/UDP)]
         ↓
@@ -251,7 +257,7 @@ Page served from: lb-backend-xxxxx
 ```
 
 **Fluxo:**
-1. Cliente conecta a `34.47.249.144:80`
+1. Cliente conecta a `34.48.214.167:80`
 2. Forwarding Rule recebe a conexão
 3. Target Pool balanceia entre web1, web2, web3
 4. Health Check verifica continuamente se todas estão vivas
@@ -268,7 +274,7 @@ HTTP Load Balancer (Layer 7) é mais inteligente: lê o conteúdo das requisiç�
 
 ```bash
 gcloud compute instance-templates create lb-backend-template \
-   --region=asia-south1 \
+   --region=${REGION} \
    --network=default \
    --subnet=default \
    --tags=allow-health-check \
@@ -303,7 +309,7 @@ gcloud compute instance-groups managed create lb-backend-group \
    --base-instance-name=lb-backend \
    --template=lb-backend-template \
    --size=2 \
-   --region=asia-south1
+   --region=${REGION}
 ```
 
 **Por quê?**
@@ -377,7 +383,7 @@ gcloud compute backend-services create web-backend-service \
 ```bash
 gcloud compute backend-services add-backend web-backend-service \
    --instance-group=lb-backend-group \
-   --instance-group-region=asia-south1 \
+   --instance-group-region=${REGION} \
    --global
 ```
 
@@ -478,17 +484,17 @@ gcloud compute instance-templates delete lb-backend-template --quiet
 
 ### Deletar uma instância
 ```bash
-gcloud compute instances delete web1 --zone=asia-south1-a --quiet
+gcloud compute instances delete web1 --zone=${ZONE} --quiet
 ```
 
 ### Ver detalhes de uma instância
 ```bash
-gcloud compute instances describe web1 --zone=asia-south1-a
+gcloud compute instances describe web1 --zone=${ZONE}
 ```
 
 ### Acessar via SSH
 ```bash
-gcloud compute ssh web1 --zone=asia-south1-a
+gcloud compute ssh web1 --zone=${ZONE}
 ```
 
 ---

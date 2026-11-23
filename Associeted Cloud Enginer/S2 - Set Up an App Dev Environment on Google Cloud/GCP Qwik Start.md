@@ -22,7 +22,10 @@ Cloud Storage permite armazenar dados estruturados e não-estruturados em bucket
 ### Passo 1: Criar um Bucket
 
 ```bash
-gcloud storage buckets create gs://qwiklabs-gcp-03-42477ee9628d
+REGION=us-west1
+gcloud config set compute/region ${REGION}
+
+gcloud storage buckets create gs://$DEVSHELL_PROJECT_ID
 ```
 
 **Por quê?**
@@ -32,14 +35,14 @@ gcloud storage buckets create gs://qwiklabs-gcp-03-42477ee9628d
 
 **Resultado esperado:**
 ```
-Creating gs://qwiklabs-gcp-03-42477ee9628d/
-Bucket [gs://qwiklabs-gcp-03-42477ee9628d] created.
+Creating gs://qwiklabs-gcp-02-4a56be351f56/
+Bucket [gs://qwiklabs-gcp-02-4a56be351f56] created.
 ```
 
 ### Passo 2: Fazer Upload de um Arquivo Local
 
 ```bash
-gcloud storage cp ada.jpg gs://qwiklabs-gcp-03-42477ee9628d
+gcloud storage cp ada.jpg gs://$DEVSHELL_PROJECT_ID
 ```
 
 **Por quê?**
@@ -49,14 +52,14 @@ gcloud storage cp ada.jpg gs://qwiklabs-gcp-03-42477ee9628d
 
 **Resultado esperado:**
 ```
-Copying file://./ada.jpg to gs://qwiklabs-gcp-03-42477ee9628d/ada.jpg
+Copying file://./ada.jpg to gs://$DEVSHELL_PROJECT_ID/ada.jpg
   Completed 1/1
 ```
 
 ### Passo 3: Listar Arquivos no Bucket
 
 ```bash
-gcloud storage ls -l gs://qwiklabs-gcp-03-42477ee9628d/ada.jpg
+gcloud storage ls -l gs://$DEVSHELL_PROJECT_ID/ada.jpg
 ```
 
 **Por quê?**
@@ -65,13 +68,13 @@ gcloud storage ls -l gs://qwiklabs-gcp-03-42477ee9628d/ada.jpg
 
 **Resultado esperado:**
 ```
-   1024  2026-05-13T10:15:30Z  gs://qwiklabs-gcp-03-42477ee9628d/ada.jpg
+   1024  2026-05-13T10:15:30Z  gs://$DEVSHELL_PROJECT_ID/ada.jpg
 ```
 
 ### Passo 4: Fazer Download de Arquivo do Bucket
 
 ```bash
-gcloud storage cp gs://qwiklabs-gcp-03-42477ee9628d/ada.jpg ./local-ada.jpg
+gcloud storage cp -r gs://$DEVSHELL_PROJECT_ID/ada.jpg ./local-ada.jpg
 ```
 
 **Por quê?**
@@ -81,7 +84,7 @@ gcloud storage cp gs://qwiklabs-gcp-03-42477ee9628d/ada.jpg ./local-ada.jpg
 ### Passo 5: Copiar Arquivo dentro do Bucket (em Subdiretório)
 
 ```bash
-gcloud storage cp gs://qwiklabs-gcp-03-42477ee9628d/ada.jpg gs://qwiklabs-gcp-03-42477ee9628d/image-folder/
+gcloud storage cp gs://$DEVSHELL_PROJECT_ID/ada.jpg gs://$DEVSHELL_PROJECT_ID/image-folder/
 ```
 
 **Por quê?**
@@ -91,7 +94,7 @@ gcloud storage cp gs://qwiklabs-gcp-03-42477ee9628d/ada.jpg gs://qwiklabs-gcp-03
 ### Passo 6: Copiar Recursivamente (Diretório Inteiro)
 
 ```bash
-gcloud storage cp -r gs://qwiklabs-gcp-03-42477ee9628d ./local-backup
+gcloud storage cp -r gs://$DEVSHELL_PROJECT_ID ./local-backup
 ```
 
 **Por quê?**
@@ -101,7 +104,7 @@ gcloud storage cp -r gs://qwiklabs-gcp-03-42477ee9628d ./local-backup
 ### Passo 7: Gerenciar Permissões - Fazer Público
 
 ```bash
-gcloud storage objects update gs://qwiklabs-gcp-03-42477ee9628d/ada.jpg \
+gcloud storage objects update gs://$DEVSHELL_PROJECT_ID/ada.jpg \
   --add-acl-grant=entity=allUsers,role=READER
 ```
 
@@ -119,7 +122,7 @@ ada.jpg is now readable by allUsers
 ### Passo 8: Remover Permissões Públicas
 
 ```bash
-gcloud storage objects update gs://qwiklabs-gcp-03-42477ee9628d/ada.jpg \
+gcloud storage objects update gs://$DEVSHELL_PROJECT_ID/ada.jpg \
   --remove-acl-grant=allUsers
 ```
 
@@ -130,7 +133,7 @@ gcloud storage objects update gs://qwiklabs-gcp-03-42477ee9628d/ada.jpg \
 ### Passo 9: Deletar um Arquivo
 
 ```bash
-gcloud storage rm gs://qwiklabs-gcp-03-42477ee9628d/ada.jpg
+gcloud storage rm gs://$DEVSHELL_PROJECT_ID/ada.jpg
 ```
 
 **Por quê?**
@@ -164,18 +167,13 @@ IAM controla quem pode acessar quais recursos do GCP. Define roles (papéis) e b
 ### Passo 1: Listar Buckets (Verificar Acesso)
 
 ```bash
-gsutil ls gs://qwiklabs-gcp-02-816e2a178921
+gcloud storage ls gs://$DEVSHELL_PROJECT_ID
 ```
 
 **Por quê?**
 - `gsutil` é a ferramenta legada de Storage (ainda funciona)
 - Listar buckets verifica se sua conta tem permissão de acesso
 - Se não tiver permissão, retorna erro de acesso negado
-
-**Ou com gcloud (novo):**
-```bash
-gcloud storage ls gs://qwiklabs-gcp-02-816e2a178921
-```
 
 ### Conceitos-Chave de IAM
 
@@ -189,7 +187,7 @@ gcloud storage ls gs://qwiklabs-gcp-02-816e2a178921
 ### Passo 2: Visualizar Política IAM de um Projeto
 
 ```bash
-gcloud projects get-iam-policy PROJECT_ID
+gcloud projects get-iam-policy $DEVSHELL_PROJECT_ID
 ```
 
 **Por quê?**
@@ -199,7 +197,7 @@ gcloud projects get-iam-policy PROJECT_ID
 ### Passo 3: Conceder Role a um Usuário
 
 ```bash
-gcloud projects add-iam-policy-binding PROJECT_ID \
+gcloud projects add-iam-policy-binding $DEVSHELL_PROJECT_ID \
   --member=user:usuario@example.com \
   --role=roles/compute.admin
 ```
@@ -212,7 +210,7 @@ gcloud projects add-iam-policy-binding PROJECT_ID \
 ### Passo 4: Revogar Role de um Usuário
 
 ```bash
-gcloud projects remove-iam-policy-binding PROJECT_ID \
+gcloud projects remove-iam-policy-binding $DEVSHELL_PROJECT_ID \
   --member=user:usuario@example.com \
   --role=roles/compute.admin
 ```
@@ -240,8 +238,8 @@ Cloud Monitoring coleta métricas de recursos (VMs, bancos de dados, etc.) e per
 ### Passo 1: Configurar Região e Zona Padrão
 
 ```bash
-gcloud config set compute/zone "us-east4-c"
-gcloud config set compute/region "us-east4"
+gcloud config set compute/region "us-east1"
+gcloud config set compute/zone "us-east1-c"
 
 export ZONE=$(gcloud config get compute/zone)
 export REGION=$(gcloud config get compute/region)
@@ -350,7 +348,7 @@ Cloud Run executa código (geralmente em containers) sem gerenciar infraestrutur
 ### Passo 1: Configurar Região Padrão
 
 ```bash
-gcloud config set run/region europe-west3
+gcloud config set run/region us-central1
 ```
 
 **Por quê?**
@@ -437,7 +435,7 @@ npm install
 gcloud functions deploy nodejs-pubsub-function \
   --gen2 \
   --runtime=nodejs22 \
-  --region=europe-west3 \
+  --region=us-central1 \
   --source=. \
   --entry-point=helloPubSub \
   --trigger-topic cf-demo \
@@ -468,7 +466,7 @@ Created successfully.
 
 ```bash
 gcloud functions describe nodejs-pubsub-function \
-  --region=europe-west3
+  --region=us-central1
 ```
 
 **Por quê?**
@@ -488,7 +486,7 @@ gcloud pubsub topics publish cf-demo --message="Cloud Function Gen2"
 
 ```bash
 gcloud functions logs read nodejs-pubsub-function \
-  --region=europe-west3 --limit=50
+  --region=us-central1 --limit=50
 ```
 
 **Por quê?**
@@ -497,7 +495,7 @@ gcloud functions logs read nodejs-pubsub-function \
 
 **Ou com logging mais detalhado:**
 ```bash
-gcloud logging tail 'resource.type="cloud_function" AND resource.labels.function_name="nodejs-pubsub-function" AND resource.labels.region="europe-west3"'
+gcloud logging tail 'resource.type="cloud_function" AND resource.labels.function_name="nodejs-pubsub-function" AND resource.labels.region="us-west1"'
 ```
 
 ### Resumo Visual - Cloud Run
@@ -912,11 +910,11 @@ from concurrent.futures import TimeoutError
 from google.cloud import pubsub_v1
 import logging
 
-project_id = "SEU_PROJETO"
+$DEVSHELL_PROJECT_ID = "SEU_PROJETO"
 subscription_id = "SUA_SUBSCRICAO"
 
 subscriber = pubsub_v1.SubscriberClient()
-subscription_path = subscriber.subscription_path(project_id, subscription_id)
+subscription_path = subscriber.subscription_path($DEVSHELL_PROJECT_ID, subscription_id)
 
 flow_control = pubsub_v1.types.FlowControl(
   max_messages=50,

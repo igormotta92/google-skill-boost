@@ -24,7 +24,7 @@ Padronizar variaveis evita erro de digitacao e facilita reaproveitar os comandos
 # export PROJECT_ID="$(gcloud config get-value project)"
 export PROJECT_ID=$DEVSHELL_PROJECT_ID
 export REGION="us-central1"         # ajuste conforme ambiente, ex: us-central1
-export ZONE="us-central1-a"         # ajuste conforme ambiente, ex: us-central1-a
+export ZONE="us-central1-f"         # ajuste conforme ambiente, ex: us-central1-f
 
 export SA_TASK1_NAME="my-sa-123"
 export SA_BQ_NAME="bigquery-qwiklab"
@@ -77,12 +77,13 @@ gcloud iam service-accounts create "$SA_TASK1_NAME" \
   --display-name="my service account"
 ```
 
-### Passo 2: Conceder papel `roles/editor` no projeto
+### Passo 2: Conceder papel `roles/storage.admin` no projeto
 
 ```bash
 gcloud projects add-iam-policy-binding "$DEVSHELL_PROJECT_ID" \
   --member="serviceAccount:${SA_TASK1_EMAIL}" \
-  --role="roles/editor"
+  --role="roles/storage.admin" \
+  --condition=None
 ```
 
 ### Explicacao dos parametros principais
@@ -91,12 +92,13 @@ gcloud projects add-iam-policy-binding "$DEVSHELL_PROJECT_ID" \
 - `--display-name`: nome amigavel exibido no Console.
 - `projects add-iam-policy-binding`: adiciona um binding IAM no nivel de projeto.
 - `--member=serviceAccount:...`: principal que recebera o papel.
-- `--role=roles/editor`: papel predefinido com permissoes amplas no projeto.
+- `--role=roles/storage.admin`: papel predefinido com controle total sobre buckets e objetos do Cloud Storage.
+- `--condition=None`: adiciona o binding sem condicao; evita o prompt interativo quando a policy do projeto ja possui bindings condicionais.
 
 ### Resultado esperado
 
 - A service account `my-sa-123` existe no projeto.
-- Ela aparece como membro com papel `roles/editor` na politica IAM do projeto.
+- Ela aparece como membro com papel `roles/storage.admin` na politica IAM do projeto.
 
 ### Validacao rapida da tarefa
 
@@ -131,11 +133,13 @@ gcloud iam service-accounts create "$SA_BQ_NAME" \
 ```bash
 gcloud projects add-iam-policy-binding "$DEVSHELL_PROJECT_ID" \
   --member="serviceAccount:${SA_BQ_EMAIL}" \
-  --role="roles/bigquery.dataViewer"
+  --role="roles/bigquery.dataViewer" \
+  --condition=None
 
 gcloud projects add-iam-policy-binding "$DEVSHELL_PROJECT_ID" \
   --member="serviceAccount:${SA_BQ_EMAIL}" \
-  --role="roles/bigquery.user"
+  --role="roles/bigquery.user" \
+  --condition=None
 ```
 
 ### Explicacao dos parametros principais
@@ -168,7 +172,7 @@ gcloud compute instances create "$VM_NAME" \
 ```bash
 gcloud compute ssh "$VM_NAME" --zone="$ZONE" --command '
   sudo apt-get update &&
-  sudo apt-get install -y git python3 python3-pip python3.11-venv &&
+  sudo apt-get install -y git python3 python3-pip python3-venv &&
   python3 -m venv myvenv &&
   . myvenv/bin/activate &&
   pip3 install --upgrade pip &&
@@ -203,8 +207,14 @@ client = bigquery.Client(
 print(client.query(query).to_dataframe())
 PYEOF"
 
-# myvenv/bin/python3 query.py
+# Conferir se PROJECT_ID e service account foram preenchidos
+gcloud compute ssh "$VM_NAME" --zone="$ZONE" --command "cat query.py"
+
+# Executar com o Python do venv (onde as bibliotecas foram instaladas)
+gcloud compute ssh "$VM_NAME" --zone="$ZONE" --command "myvenv/bin/python3 query.py"
 ```
+
+Observacao: o heredoc interno usa `'PYEOF'`, mas como o comando inteiro esta entre aspas duplas no Cloud Shell, `${SA_BQ_EMAIL}` e `${PROJECT_ID}` sao expandidos antes de enviar para a VM. Isso substitui os `sed` do lab (`YOUR_SERVICE_ACCOUNT` e Project ID).
 
 ### Resultado esperado
 
@@ -242,7 +252,7 @@ gcloud compute instances describe "$VM_NAME" --zone="$ZONE" \
 ### 4) Validar consulta BigQuery novamente
 
 ```bash
-gcloud compute ssh "$VM_NAME" --zone="$ZONE" --command "python3 query.py"
+gcloud compute ssh "$VM_NAME" --zone="$ZONE" --command "myvenv/bin/python3 query.py"
 ```
 
 ---
@@ -291,7 +301,7 @@ gcloud iam service-accounts delete "$SA_BQ_EMAIL" --quiet
 ## Fluxo Final
 
 1. Definir projeto/regiao/zona e habilitar APIs.
-2. Criar `my-sa-123` e conceder `roles/editor`.
+2. Criar `my-sa-123` e conceder `roles/storage.admin`.
 3. Criar `bigquery-qwiklab` e conceder papeis de BigQuery.
 4. Criar `bigquery-instance` com Debian 12, `e2-medium`, e service account `bigquery-qwiklab`.
 5. Instalar dependencias Python na VM.

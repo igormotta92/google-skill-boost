@@ -41,12 +41,14 @@ Como o desafio usa dois projetos, o fluxo mais seguro e reproduzivel e trabalhar
 
 ```bash
 # IDs fornecidos no desafio
-export PROJECT_A="qwiklabs-gcp-01-d2c52a1ef9ea"
-export PROJECT_B="qwiklabs-gcp-00-05ffcf4d9498"
+export PROJECT_A="qwiklabs-gcp-04-1cf1ccfe3252"
+export PROJECT_B="qwiklabs-gcp-03-9f47cf464ac0"
 
-# Regiao/zona usadas no enunciado
-export REGION="us-east1"
-export ZONE="us-east1-c"
+# Regiao/zona usadas no enunciado (cada projeto em uma regiao diferente)
+export REGION_A="us-east1"
+export ZONE_A="us-east1-c"
+export REGION_B="us-east4"
+export ZONE_B="us-east4-b"
 
 # Recursos exigidos pelo lab
 export NETWORK_A="network-a"
@@ -68,8 +70,19 @@ export PEER_BA="peer-ba"
 
 ### Como executar com dois shells
 
+O lab usa duas abas do Cloud Shell (botao **Open a new tab (+)** na toolbar). Variaveis nao sao compartilhadas entre abas: **rode o bloco de variaveis acima nas duas abas**.
+
 - Shell A: mantenha `PROJECT_A` como contexto padrao.
+
+```bash
+gcloud config set project "$PROJECT_A"
+```
+
 - Shell B: mantenha `PROJECT_B` como contexto padrao.
+
+```bash
+gcloud config set project "$PROJECT_B"
+```
 
 Se optar por um unico shell, execute sempre `gcloud config set project ...` antes de cada bloco.
 
@@ -91,10 +104,10 @@ gcloud compute networks create "$NETWORK_A" \
 gcloud compute networks subnets create "$SUBNET_A" \
   --network="$NETWORK_A" \
   --range="$SUBNET_A_RANGE" \
-  --region="$REGION"
+  --region="$REGION_A"
 
 gcloud compute instances create "$VM_A" \
-  --zone="$ZONE" \
+  --zone="$ZONE_A" \
   --network="$NETWORK_A" \
   --subnet="$SUBNET_A" \
   --machine-type=e2-small
@@ -114,7 +127,7 @@ gcloud compute firewall-rules create "$FW_A" \
 ### Resultado esperado
 
 - VPC `network-a` criada no `PROJECT_A`.
-- Sub-rede `network-a-subnet` com CIDR `10.0.0.0/16`.
+- Sub-rede `network-a-subnet` com CIDR `10.0.0.0/16` em `us-east1`.
 - VM `vm-a` criada e em estado `RUNNING`.
 - Firewall `network-a-fw` ativo.
 
@@ -129,10 +142,10 @@ gcloud compute networks create "$NETWORK_B" \
 gcloud compute networks subnets create "$SUBNET_B" \
   --network="$NETWORK_B" \
   --range="$SUBNET_B_RANGE" \
-  --region="$REGION"
+  --region="$REGION_B"
 
 gcloud compute instances create "$VM_B" \
-  --zone="$ZONE" \
+  --zone="$ZONE_B" \
   --network="$NETWORK_B" \
   --subnet="$SUBNET_B" \
   --machine-type=e2-small
@@ -144,12 +157,12 @@ gcloud compute firewall-rules create "$FW_B" \
 
 ### Explicacao dos parametros principais
 
-- Mesmo racional do Projeto A, mudando apenas nomes e CIDR (`10.8.0.0/16`).
+- Mesmo racional do Projeto A, mudando nomes, CIDR (`10.8.0.0/16`) e regiao/zona (`us-east4` / `us-east4-b`).
 
 ### Resultado esperado
 
 - VPC `network-b` criada no `PROJECT_B`.
-- Sub-rede `network-b-subnet` com CIDR `10.8.0.0/16`.
+- Sub-rede `network-b-subnet` com CIDR `10.8.0.0/16` em `us-east4`.
 - VM `vm-b` criada e em estado `RUNNING`.
 - Firewall `network-b-fw` ativo.
 
@@ -205,34 +218,35 @@ Com peering ativo e firewall liberando ICMP, VMs em VPCs pareadas devem se comun
 ### Passo 1: Obter IP interno da vm-a
 
 ```bash
-gcloud compute instances describe "$VM_A" \
+export VM_A_INTERNAL_IP="$(gcloud compute instances describe "$VM_A" \
   --project="$PROJECT_A" \
-  --zone="$ZONE" \
-  --format='get(networkInterfaces[0].networkIP)'
+  --zone="$ZONE_A" \
+  --format='get(networkInterfaces[0].networkIP)')"
+echo "$VM_A_INTERNAL_IP"
 ```
 
-Guarde o valor retornado em `VM_A_INTERNAL_IP`.
+Como o comando usa `--project`, ele funciona em qualquer uma das abas. Rode-o na aba onde fara o teste (Shell B).
 
 ### Passo 2: Testar ping a partir da vm-b
 
-Opcao 1: SSH interativo e ping manual.
+Opcao 1 (recomendada): comando unico sem abrir shell interativo. `${VM_A_INTERNAL_IP}` e expandido no Cloud Shell antes de enviar para a VM.
 
 ```bash
 gcloud compute ssh "$VM_B" \
   --project="$PROJECT_B" \
-  --zone="$ZONE"
-
-# Dentro da VM_B:
-ping -c 5 <VM_A_INTERNAL_IP>
+  --zone="$ZONE_B" \
+  --command="ping -c 5 ${VM_A_INTERNAL_IP}"
 ```
 
-Opcao 2: comando unico sem abrir shell interativo.
+Opcao 2: SSH interativo e ping manual (a variavel nao existe dentro da VM; use o IP impresso pelo `echo`).
 
 ```bash
 gcloud compute ssh "$VM_B" \
   --project="$PROJECT_B" \
-  --zone="$ZONE" \
-  --command="ping -c 5 <VM_A_INTERNAL_IP>"
+  --zone="$ZONE_B"
+
+# Dentro da vm-b:
+ping -c 5 <IP_INTERNO_DA_VM_A>
 ```
 
 ### Resultado esperado
@@ -342,17 +356,17 @@ Se quiser remover todos os recursos apos o teste:
 
 ```bash
 # Projeto B
-gcloud compute instances delete "$VM_B" --project="$PROJECT_B" --zone="$ZONE" --quiet
+gcloud compute instances delete "$VM_B" --project="$PROJECT_B" --zone="$ZONE_B" --quiet
 gcloud compute networks peerings delete "$PEER_BA" --project="$PROJECT_B" --network="$NETWORK_B" --quiet
 gcloud compute firewall-rules delete "$FW_B" --project="$PROJECT_B" --quiet
-gcloud compute networks subnets delete "$SUBNET_B" --project="$PROJECT_B" --region="$REGION" --quiet
+gcloud compute networks subnets delete "$SUBNET_B" --project="$PROJECT_B" --region="$REGION_B" --quiet
 gcloud compute networks delete "$NETWORK_B" --project="$PROJECT_B" --quiet
 
 # Projeto A
-gcloud compute instances delete "$VM_A" --project="$PROJECT_A" --zone="$ZONE" --quiet
+gcloud compute instances delete "$VM_A" --project="$PROJECT_A" --zone="$ZONE_A" --quiet
 gcloud compute networks peerings delete "$PEER_AB" --project="$PROJECT_A" --network="$NETWORK_A" --quiet
 gcloud compute firewall-rules delete "$FW_A" --project="$PROJECT_A" --quiet
-gcloud compute networks subnets delete "$SUBNET_A" --project="$PROJECT_A" --region="$REGION" --quiet
+gcloud compute networks subnets delete "$SUBNET_A" --project="$PROJECT_A" --region="$REGION_A" --quiet
 gcloud compute networks delete "$NETWORK_A" --project="$PROJECT_A" --quiet
 ```
 

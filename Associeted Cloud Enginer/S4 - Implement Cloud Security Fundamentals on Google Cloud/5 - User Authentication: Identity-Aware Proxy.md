@@ -4,7 +4,7 @@
 
 O Identity-Aware Proxy (IAP) permite proteger aplicacoes web no Google Cloud sem expor o servico diretamente na internet publica.
 
-Em vez de implementar toda a autenticacao dentro da aplicacao, o IAP intercepta as requisicoes HTTP/HTTPS, autentica o usuario com Google Identity e so encaminha o trafego para quem estiver autorizado.
+Em vez de implementar toda a autenticacao dentro da aplicacao, o IAP intercepta as requisicoes HTTP/HTTPS, autentica o usuario com Google Identity e so encaminha o trafego para quem estiver autorizado. Alem disso, pode adicionar headers com informacoes do usuario autenticado.
 
 O IAP e util para:
 
@@ -15,225 +15,267 @@ O IAP e util para:
 Principais beneficios:
 
 - Seguranca: autentica e autoriza antes da aplicacao processar a requisicao.
-- Governanca: acesso controlado por IAM (`roles/iap.httpsResourceAccessor`).
+- Governanca: acesso controlado por IAM (`roles/iap.httpsResourceAccessor` - "IAP-secured Web App User").
 - Simplicidade: para varios cenarios, basta configuracao de plataforma.
 
 ## Introducao
 
 Este guia converte o desafio para uma execucao orientada por CLI com `gcloud`, mantendo os objetivos originais do lab:
 
-- deploy de app Python no App Engine Standard;
+- deploy de app Python (Flask) no **Cloud Run**;
 - protecao de acesso com IAP;
 - leitura de identidade de usuario via headers do IAP;
 - validacao criptografica via JWT assinado (`X-Goog-IAP-JWT-Assertion`).
+
+Observacao: o lab avisa que acoes fora do escopo podem bloquear a conta. Os comandos CLI abaixo sao equivalentes aos passos de Console do lab; onde o Console e o caminho mais seguro (ex.: obter o JWT audience), isso esta indicado.
 
 ---
 
 ## Pre-requisitos e Variaveis
 
 ### Conceito
-O desafio usa App Engine + IAP e alterna entre 3 versoes da aplicacao. Para evitar erro de contexto, use variaveis e rode os comandos na ordem.
+O desafio faz 3 deploys do mesmo servico Cloud Run (`user-auth-lab`), cada um a partir de uma pasta diferente do codigo. Para evitar erro de contexto, use variaveis e rode os comandos na ordem.
 
-### Variaveis base (ajuste conforme ambiente)
+### Variaveis base
 
 ```bash
 # Projeto e identidade
 export PROJECT_ID=$DEVSHELL_PROJECT_ID
 export PROJECT_NUMBER="$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')"
-export REGION="<REGIAO_APP_ENGINE>"   # ex: us-central
-export STUDENT_EMAIL="<SEU_EMAIL_DO_LAB>"
+export REGION="us-central1"
+export STUDENT_EMAIL="$(gcloud config get-value account)"
 
-# Pastas do codigo do lab
+# Servico Cloud Run exigido pelo lab
+export SERVICE_NAME="user-auth-lab"
+
+# Service agent do IAP (precisa de run.invoker no servico)
+export IAP_SA="service-${PROJECT_NUMBER}@gcp-sa-iap.iam.gserviceaccount.com"
+
+# Codigo do lab
+export LAB_BUCKET="gs://${PROJECT_ID}-bucket"
+export LAB_ZIP="user-authentication-with-iap.zip"
 export LAB_ROOT="$HOME/user-authentication-with-iap"
 export STEP1_DIR="$LAB_ROOT/1-HelloWorld"
 export STEP2_DIR="$LAB_ROOT/2-HelloUser"
 export STEP3_DIR="$LAB_ROOT/3-HelloVerifiedUser"
-
-# IAP/OAuth (ajuste conforme ambiente/politica)
-export OAUTH_BRAND_TITLE="IAP Example"
-export OAUTH_CLIENT_DISPLAY_NAME="iap-client"
 ```
 
-### Passo 1: Definir projeto ativo
+### Passo 1: Definir projeto ativo e validar contexto
 
 ```bash
 gcloud config set project "$PROJECT_ID"
+echo "Projeto: $PROJECT_ID ($PROJECT_NUMBER) | Usuario: $STUDENT_EMAIL"
 ```
 
 ### Passo 2: Habilitar APIs necessarias
 
+Evita os prompts de "enable API" durante o `gcloud run deploy`. A API do IAP ja vem pre-habilitada no lab.
+
 ```bash
 gcloud services enable \
-  appengine.googleapis.com \
-  iap.googleapis.com \
-  cloudresourcemanager.googleapis.com
+  run.googleapis.com \
+  cloudbuild.googleapis.com \
+  artifactregistry.googleapis.com \
+  iap.googleapis.com
 ```
 
-### Passo 3: Desabilitar Flex API (como pedido no lab)
+### Passo 3: Baixar o codigo do lab
 
 ```bash
-gcloud services disable appengineflex.googleapis.com --force
+cd "$HOME"
+gcloud storage cp "${LAB_BUCKET}/${LAB_ZIP}" .
+unzip -o "$LAB_ZIP"
+cd "$LAB_ROOT"
+ls
 ```
+
+Resultado esperado: pastas `1-HelloWorld`, `2-HelloUser` e `3-HelloVerifiedUser`.
 
 ---
 
 ## TAREFA 1: Deploy da aplicacao e protecao com IAP
 
 ### Conceito
-Primeiro fazemos deploy da versao basica (Hello World). Depois habilitamos IAP no App Engine e concedemos acesso apenas ao usuario autorizado.
+Primeiro fazemos deploy da versao basica (Hello World) com acesso publico. Depois habilitamos IAP no servico Cloud Run e concedemos acesso apenas ao usuario do lab.
 
-### Passos CLI - Baixar codigo do lab
-
-```bash
-cd "$HOME"
-gsutil cp gs://spls/gsp499/user-authentication-with-iap.zip .
-unzip -o user-authentication-with-iap.zip
-cd "$LAB_ROOT"
-```
-
-### Passos CLI - Deploy da versao 1
+### Passo 1: Revisar o codigo
 
 ```bash
 cd "$STEP1_DIR"
+cat main.py
+cat requirements.txt
+```
 
-# Atualiza runtime conforme enunciado
-sed -i 's/python37/python313/g' app.yaml
+- `main.py`: app Flask que renderiza `templates/index.html`.
+- `templates/privacy.html`: exemplo de politica de privacidade.
+- `requirements.txt`: dependencias Python.
 
-# Crie App Engine se for o primeiro deploy no projeto
-# (se ja existir, este comando pode falhar com "already exists")
-gcloud app create --region="$REGION" || true
+Nenhum arquivo precisa ser alterado nesta etapa.
 
-# Deploy
-gcloud app deploy --quiet
+### Passo 2: Deploy no Cloud Run
+
+```bash
+gcloud run deploy "$SERVICE_NAME" \
+  --source . \
+  --allow-unauthenticated \
+  --region="$REGION"
+```
+
+Se perguntar para criar o repositorio do Artifact Registry, digite `Y` e `ENTER`.
+
+### Passo 3: Obter a URL do servico
+
+```bash
+export APP_URL="$(gcloud run services describe "$SERVICE_NAME" \
+  --region="$REGION" \
+  --format='value(status.url)')"
+echo "$APP_URL"
+
+curl -s "$APP_URL" | head -n 20
 ```
 
 ### Explicacao dos parametros principais
 
-- `gcloud app create --region`: define regiao do App Engine (nao muda depois).
-- `gcloud app deploy`: publica a versao da aplicacao no App Engine Standard.
-- `--quiet`: evita prompt interativo.
+- `--source .`: builda a imagem a partir do codigo local via Cloud Build (buildpacks).
+- `--allow-unauthenticated`: concede `roles/run.invoker` a `allUsers` (acesso publico inicial).
+- `--region`: regiao do servico Cloud Run.
+- `status.url`: URL publica `https://user-auth-lab-<hash>.run.app`.
 
-### Passos CLI - Obter URL da aplicacao
+> Click **Check my progress**: *Deploy a Cloud Run service*.
 
-```bash
-export APP_HOST="$(gcloud app describe --project="$PROJECT_ID" --format='value(defaultHostname)')"
-export APP_URL="https://${APP_HOST}"
+### Passo 4: Habilitar IAP no servico
 
-echo "$APP_URL"
-gcloud app browse
-```
+Console (passo do lab): **Security > Identity-Aware Proxy** > toggle IAP em `user-auth-lab` > **Turn On**.
 
-### Passos CLI - Configurar OAuth para IAP (quando necessario)
-
-Observacao: em alguns tenants/labs, parte do consentimento pode exigir Console. Quando permitido, use CLI:
+Equivalente CLI:
 
 ```bash
-# Criar brand OAuth interno (pode retornar erro se ja existir)
-gcloud iap oauth-brands create \
-  --application_title="$OAUTH_BRAND_TITLE" \
-  --support_email="$STUDENT_EMAIL" || true
-
-# Descobrir nome do brand
-export BRAND_NAME="$(gcloud iap oauth-brands list --format='value(name)' | head -n1)"
-
-# Criar cliente OAuth para IAP (pode retornar erro se ja existir)
-gcloud iap oauth-clients create "$BRAND_NAME" \
-  --display_name="$OAUTH_CLIENT_DISPLAY_NAME" || true
-
-# Listar clientes
-# Guarde CLIENT_ID e CLIENT_SECRET retornados na criacao ou via describe/list
+gcloud beta run services update "$SERVICE_NAME" \
+  --region="$REGION" \
+  --iap
 ```
 
-Se o ambiente exigir cliente explicito no enable do IAP:
+Garantir que o service agent do IAP existe e pode invocar o servico:
 
 ```bash
-export CLIENT_ID="<CLIENT_ID>"
-export CLIENT_SECRET="<CLIENT_SECRET>"
+gcloud beta services identity create --service=iap.googleapis.com --project="$PROJECT_ID"
+
+gcloud run services add-iam-policy-binding "$SERVICE_NAME" \
+  --region="$REGION" \
+  --member="serviceAccount:${IAP_SA}" \
+  --role="roles/run.invoker"
 ```
 
-### Passos CLI - Habilitar IAP para App Engine
+Teste: abra `$APP_URL` no navegador, faca login com o usuario do lab. Deve aparecer a tela **"You don't have access"** (IAP ativo, mas nenhum usuario autorizado ainda).
 
-Tentativa direta (funciona em ambientes com configuracao gerenciada):
+### Passo 5: Autorizar o usuario do lab no IAP
 
-```bash
-gcloud iap web enable --resource-type=app-engine
-```
+Console (passo do lab): marque `user-auth-lab` > **Add Principal** > email do aluno > role **Cloud IAP > IAP-secured Web App User** > **Save**.
 
-Se o comando pedir credenciais OAuth, rode:
-
-```bash
-gcloud iap web enable \
-  --resource-type=app-engine \
-  --oauth2-client-id="$CLIENT_ID" \
-  --oauth2-client-secret="$CLIENT_SECRET"
-```
-
-### Passos CLI - Autorizar usuario no IAP
+Equivalente CLI:
 
 ```bash
 gcloud iap web add-iam-policy-binding \
-  --resource-type=app-engine \
+  --resource-type=cloud-run \
+  --service="$SERVICE_NAME" \
+  --region="$REGION" \
   --member="user:${STUDENT_EMAIL}" \
   --role="roles/iap.httpsResourceAccessor"
 ```
 
+### Explicacao dos parametros principais
+
+- `run services update --iap`: liga o IAP diretamente no servico Cloud Run (sem Load Balancer).
+- `services identity create`: cria o service agent `service-PROJECT_NUMBER@gcp-sa-iap...` caso ainda nao exista.
+- `roles/run.invoker` para o IAP SA: o IAP precisa invocar o servico em nome do usuario.
+- `iap web add-iam-policy-binding --resource-type=cloud-run`: aplica a policy de acesso no recurso protegido pelo IAP.
+- `roles/iap.httpsResourceAccessor`: "IAP-secured Web App User".
+
 ### Resultado esperado
 
-- Aplicacao publicada no App Engine.
-- IAP habilitado para o recurso App Engine.
-- Usuario do lab autorizado com papel de acesso a app protegida por IAP.
+Recarregue a pagina da app: o "Hello World" aparece. A mudanca de role pode levar ~1 minuto.
 
-## Test access
-Navigate back to your app and reload the page. You should now see your web app, since you already logged in with a user you authorized.
+Se continuar com acesso negado, limpe o cookie de login do IAP:
 
-If you still see the "You don't have access" page, IAP did not recheck your authorization. In that case, do the following steps:
+```bash
+echo "${APP_URL}/_gcp_iap/clear_login_cookie"
+```
 
-Open your web browser to the home page address with /_gcp_iap/clear_login_cookie added to the end of the URL, as in https://iap-example-999999.appspot.com/_gcp_iap/clear_login_cookie.
-You will see a new Sign in with Google screen, with your account already showing. Do not click the account. Instead, click Use another account, and re-enter your credentials.
+Abra essa URL, clique em **Use another account** e entre novamente com as credenciais do aluno.
+
+> Click **Check my progress**: *Enable and add policy to IAP*.
 
 ---
 
 ## TAREFA 2: Acessar informacoes de identidade do usuario
 
 ### Conceito
-Com IAP ativo, a aplicacao pode ler headers injetados pelo proxy, como:
+Com IAP ativo, a aplicacao pode ler headers injetados pelo proxy:
 
 - `X-Goog-Authenticated-User-Email`
 - `X-Goog-Authenticated-User-ID`
 
-A versao 2 do app exibe esses valores na pagina.
+A versao 2 do app exibe esses valores na pagina (prefixados com `accounts.google.com:`).
 
-curl -X GET https://qwiklabs-gcp-01-36add0e40dfa.uc.r.appspot.com/ -H "X-Goog-Authenticated-User-Email: totally fake email"
-
-### Passos CLI - Deploy da versao 2
+### Passo 1: Deploy da versao 2
 
 ```bash
 cd "$STEP2_DIR"
-sed -i 's/python37/python313/g' app.yaml
-gcloud app deploy --quiet
+
+gcloud run deploy "$SERVICE_NAME" \
+  --source . \
+  --region="$REGION"
 ```
 
-### Passos CLI - Teste funcional
+### Passo 2: Examinar os arquivos alterados
+
+```bash
+cat main.py
+cat templates/index.html
+```
+
+Trechos relevantes:
+
+```python
+user_email = request.headers.get('X-Goog-Authenticated-User-Email')
+user_id = request.headers.get('X-Goog-Authenticated-User-ID')
+
+page = render_template('index.html', email=user_email, id=user_id)
+```
+
+```html
+Hello, {{ email }}! Your persistent ID is {{ id }}.
+```
+
+### Passo 3: Testar
 
 ```bash
 echo "$APP_URL"
-gcloud app browse
 ```
 
-Abra a URL no navegador e valide:
+Abra a URL no navegador (recarregue se necessario): devem aparecer seu email e o persistent ID.
 
-- com usuario autorizado: acesso permitido e exibicao de email/ID;
-- com usuario nao autorizado: tela de bloqueio de acesso.
+### Passo 4: Desligar IAP (simular bypass)
 
-### Passos CLI - Simular app sem IAP (teste de risco)
+Console (passo do lab): **Security > Identity-Aware Proxy** > toggle IAP de `user-auth-lab` para off > **Allow public access**.
 
-Desabilite IAP:
+Equivalente CLI:
 
 ```bash
-gcloud iap web disable --resource-type=app-engine
+gcloud beta run services update "$SERVICE_NAME" \
+  --region="$REGION" \
+  --no-iap
+
+# "Allow public access": garante allUsers como invoker
+gcloud run services add-iam-policy-binding "$SERVICE_NAME" \
+  --region="$REGION" \
+  --member="allUsers" \
+  --role="roles/run.invoker"
 ```
 
-Teste spoof de header:
+Recarregue a pagina: ela aparece, mas sem informacao de usuario.
+
+### Passo 5: Spoof de header
 
 ```bash
 curl -X GET "$APP_URL" \
@@ -242,166 +284,211 @@ curl -X GET "$APP_URL" \
 
 ### Explicacao dos parametros principais
 
-- `iap web disable`: remove protecao do proxy para mostrar o risco.
-- `curl -H`: injeta header manual para demonstrar que, sem IAP, a app nao consegue confiar nesse dado.
+- `--no-iap`: remove a protecao do proxy para demonstrar o risco.
+- `allUsers` + `run.invoker`: torna o servico publico novamente.
+- `curl -H`: injeta header manual; sem IAP, a app nao tem como saber que o dado e falso.
 
 ### Resultado esperado
 
-- Com IAP desligado, pagina pode aceitar header falso.
-- Fica evidente a necessidade de validacao criptografica quando houver risco de bypass.
+O HTML retornado mostra `Hello, totally fake email! Your persistent ID is None.`
+
+> Click **Check my progress**: *Access User Identity Information*.
 
 ---
 
 ## TAREFA 3: Usar validacao criptografica (JWT do IAP)
 
 ### Conceito
-A versao 3 usa o header `X-Goog-IAP-JWT-Assertion` e valida assinatura digital com chaves publicas do Google para garantir autenticidade dos dados de identidade.
+A versao 3 usa o header `X-Goog-IAP-JWT-Assertion` e valida a assinatura digital com as chaves publicas do Google, conferindo tambem o **audience** (para qual recurso o token foi emitido). Assim, dados de identidade so sao aceitos se vieram do IAP sem alteracao.
 
-### Passos CLI - Deploy da versao 3
+### Passo 1: Obter o JWT audience (Client ID)
+
+Console (recomendado, e o que o lab pede): **Security > Identity-Aware Proxy** > linha `user-auth-lab` > role a tabela ate a coluna **Actions** > **⋮** > **Get JWT audience code** > copie o **Client ID** > **OK**.
+
+Guarde o valor em variavel:
+
+```bash
+export IAP_AUDIENCE="/projects/1067617003678/locations/us-central1/services/user-auth-lab"
+echo "$IAP_AUDIENCE"
+```
+
+### Passo 2: Deploy da versao 3 com `IAP_AUDIENCE`
 
 ```bash
 cd "$STEP3_DIR"
-sed -i 's/python37/python313/g' app.yaml
-gcloud app deploy --quiet
+
+gcloud run deploy "$SERVICE_NAME" \
+  --source . \
+  --set-env-vars IAP_AUDIENCE="${IAP_AUDIENCE}" \
+  --region="$REGION"
 ```
 
-### Passos CLI - Reabilitar IAP
+> Click **Check my progress**: *Use Cryptographic Verification*.
+
+### Passo 3: Examinar os arquivos
 
 ```bash
-gcloud iap web enable --resource-type=app-engine
+cat auth.py
+cat main.py
 ```
 
-Se solicitado, habilite com cliente OAuth:
+Funcao principal em `auth.py`:
+
+```python
+def user():
+    assertion = request.headers.get('X-Goog-IAP-JWT-Assertion')
+    if assertion is None:
+        return None, None
+
+    info = jwt.decode(
+        assertion,
+        keys(),
+        algorithms=['ES256'],
+        audience=audience()
+    )
+
+    return info['email'], info['sub']
+```
+
+- `keys()`: busca as chaves publicas do Google usadas para assinar o JWT.
+- `audience()`: le `IAP_AUDIENCE` do ambiente.
+- `sub`: ID unico e persistente do usuario.
+
+### Passo 4: Testar sem IAP
 
 ```bash
-gcloud iap web enable \
-  --resource-type=app-engine \
-  --oauth2-client-id="$CLIENT_ID" \
-  --oauth2-client-secret="$CLIENT_SECRET"
+echo "$APP_URL"
+```
+
+Como o IAP esta desligado desde a Tarefa 2, a pagina mostra `None` para email e ID verificados.
+
+### Passo 5: Religar IAP e autorizar o service agent
+
+Console (passo do lab): toggle IAP de `user-auth-lab` para on > **Turn On**.
+
+Equivalente CLI:
+
+```bash
+gcloud beta run services update "$SERVICE_NAME" \
+  --region="$REGION" \
+  --iap
+```
+
+Conceder ao service agent do IAP permissao para invocar o servico (comando do lab):
+
+```bash
+gcloud run services add-iam-policy-binding "$SERVICE_NAME" \
+  --region="$REGION" \
+  --member="serviceAccount:${IAP_SA}" \
+  --role="roles/run.invoker"
 ```
 
 ### Resultado esperado
 
-- Com IAP ligado, app mostra identidade validada.
-- Sem IAP (ou com bypass), dados validados ficam ausentes/invalidos.
+- Recarregue a pagina: email e ID **verificados** aparecem corretamente.
+- O email verificado nao tem o prefixo `accounts.google.com:`.
+- Com IAP desligado ou com bypass, os dados verificados ficam ausentes ou invalidos, pois a assinatura so pode ser gerada pelo Google.
 
 ---
 
 ## Validacao
 
-### Validar status do App Engine e URL
+### Validar servico Cloud Run e URL
 
 ```bash
-gcloud app describe --project="$PROJECT_ID" \
-  --format="table(id,locationId,defaultHostname)"
+gcloud run services describe "$SERVICE_NAME" \
+  --region="$REGION" \
+  --format="value(status.url, metadata.annotations.'run.googleapis.com/iap-enabled')"
 ```
 
-### Validar servicos/API
+### Validar variavel IAP_AUDIENCE no servico
 
 ```bash
-gcloud services list --enabled \
-  --filter="name:appengine.googleapis.com OR name:iap.googleapis.com"
+gcloud run services describe "$SERVICE_NAME" \
+  --region="$REGION" \
+  --format="yaml(spec.template.spec.containers[0].env)"
 ```
+
+### Validar invokers do Cloud Run
+
+```bash
+gcloud run services get-iam-policy "$SERVICE_NAME" --region="$REGION"
+```
+
+Esperado: `serviceAccount:${IAP_SA}` com `roles/run.invoker`.
 
 ### Validar politica IAM do IAP
 
 ```bash
-gcloud iap web get-iam-policy --resource-type=app-engine
+gcloud iap web get-iam-policy \
+  --resource-type=cloud-run \
+  --service="$SERVICE_NAME" \
+  --region="$REGION"
 ```
 
-Esperado: membro `user:${STUDENT_EMAIL}` com role `roles/iap.httpsResourceAccessor`.
-
-### Validar acesso da aplicacao
-
-- Usuario autorizado: abre app normalmente.
-- Usuario nao autorizado: recebe bloqueio do IAP.
-- Com IAP desligado: resposta pode refletir header falso via `curl`.
+Esperado: `user:${STUDENT_EMAIL}` com `roles/iap.httpsResourceAccessor`.
 
 ---
 
 ## Troubleshooting
 
-### Erro de deploy no App Engine
+### `gcloud run deploy` pede para habilitar API / criar repositorio
 
-Possiveis causas:
+Digite `Y`. Para evitar os prompts, rode o Passo 2 de pre-requisitos (enable das APIs) antes do primeiro deploy.
 
-- app nao criado na regiao;
-- APIs nao habilitadas;
-- propagacao temporaria de IAM/API.
+### Comandos `--iap` ou `--resource-type=cloud-run` nao reconhecidos
 
-Comandos de checagem:
+Versao do `gcloud` sem suporte a IAP direto no Cloud Run. Atualize os componentes ou use o Console (**Security > Identity-Aware Proxy**) para ligar/desligar o IAP e adicionar o principal.
 
 ```bash
-gcloud app describe --project="$PROJECT_ID"
-gcloud services list --enabled | grep -E "appengine|iap"
-```
-
-### Erro ao habilitar IAP
-
-Possiveis causas:
-
-- OAuth brand/client nao criado;
-- permissao insuficiente para configurar OAuth consent;
-- necessidade de informar `--oauth2-client-id` e `--oauth2-client-secret`.
-
-Comandos de checagem:
-
-```bash
-gcloud iap oauth-brands list
-gcloud iap oauth-clients list "$BRAND_NAME"
+gcloud components update   # fora do Cloud Shell
+gcloud version
 ```
 
 ### Usuario segue sem acesso
 
 Possiveis causas:
 
-- binding IAM nao aplicado ainda (delay de propagacao);
+- binding IAM ainda propagando (aguarde 1-2 minutos);
 - login em conta diferente da autorizada;
-- cookie de sessao antigo.
+- cookie de sessao antigo (use `${APP_URL}/_gcp_iap/clear_login_cookie`).
 
-Comandos/acoes:
+### Erro 403 / "Forbidden" com IAP ligado
 
-```bash
-gcloud iap web get-iam-policy --resource-type=app-engine
-```
+O service agent do IAP nao tem `roles/run.invoker`. Rode novamente o binding de `${IAP_SA}` (Tarefa 3, Passo 5).
 
-Depois, aguarde 1-2 minutos e refaca login.
+### Pagina mostra `None` mesmo com IAP ligado (Tarefa 3)
+
+- `IAP_AUDIENCE` vazio ou incorreto: confira com o comando de validacao e refaca o deploy com o Client ID do Console.
+- IAP religado ha pouco tempo: aguarde e recarregue.
 
 ---
 
 ## Limpeza (opcional)
 
-Se quiser remover versoes e recursos do lab:
-
 ```bash
-# Opcional: remover servico default do App Engine (cuidado em projetos compartilhados)
-gcloud app services delete default --quiet
-
-# Opcional: desabilitar IAP
-gcloud iap web disable --resource-type=app-engine
-
-# Opcional: desabilitar APIs
-gcloud services disable iap.googleapis.com appengine.googleapis.com --force
+gcloud run services delete "$SERVICE_NAME" --region="$REGION" --quiet
 ```
 
 ---
 
 ## Conceitos-chave
 
-- IAP: controle de acesso a aplicacoes web baseado em identidade.
-- IAM no IAP: papel principal para acesso web e `roles/iap.httpsResourceAccessor`.
-- Headers de identidade: uteis, mas devem ser confiados somente quando protegidos por IAP.
-- JWT assertion do IAP: permite validacao criptografica da identidade.
+- IAP: controle de acesso a aplicacoes web baseado em identidade, aplicado antes da requisicao chegar na app.
+- IAP no Cloud Run: habilitado direto no servico; o service agent do IAP precisa de `roles/run.invoker`.
+- IAM no IAP: `roles/iap.httpsResourceAccessor` ("IAP-secured Web App User") libera o acesso do usuario.
+- Headers de identidade (`X-Goog-Authenticated-User-*`): uteis, mas so confiaveis quando o IAP nao pode ser contornado.
+- JWT assertion do IAP (`X-Goog-IAP-JWT-Assertion`): validacao criptografica com chaves publicas do Google + audience.
 - Seguranca em profundidade: autenticacao, autorizacao e verificacao criptografica.
 
 ---
 
 ## Fluxo Final
 
-1. Baixar codigo e preparar variaveis.
-2. Deploy `1-HelloWorld` no App Engine.
-3. Configurar OAuth (quando necessario), habilitar IAP e conceder acesso IAM.
-4. Deploy `2-HelloUser` e validar headers de identidade.
-5. Desligar IAP e simular spoof para entender risco.
-6. Deploy `3-HelloVerifiedUser` e validar fluxo com JWT assinado.
-7. Validar acesso autorizado vs nao autorizado e status final do IAP.
+1. Definir variaveis, habilitar APIs e baixar o codigo de `gs://${PROJECT_ID}-bucket`.
+2. Deploy de `1-HelloWorld` no Cloud Run (`user-auth-lab`, publico).
+3. Ligar IAP, dar `run.invoker` ao service agent do IAP e conceder `IAP-secured Web App User` ao aluno.
+4. Deploy de `2-HelloUser` e validar email/ID via headers.
+5. Desligar IAP (acesso publico) e simular spoof com `curl`.
+6. Obter o JWT audience (Client ID) e fazer deploy de `3-HelloVerifiedUser` com `IAP_AUDIENCE`.
+7. Religar IAP, garantir `run.invoker` para o IAP SA e validar identidade verificada.

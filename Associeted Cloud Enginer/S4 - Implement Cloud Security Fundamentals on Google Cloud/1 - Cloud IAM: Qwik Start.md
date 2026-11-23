@@ -24,10 +24,10 @@ Como o lab usa dois usuarios (Username 1 e Username 2), os comandos abaixo devem
 ```bash
 # Ajuste conforme ambiente do lab
 export PROJECT_ID="$(gcloud config get-value project)"
-export USERNAME_2="student-02-f7a8d6517748@qwiklabs.net"
+export USERNAME_2="student-01-4d48d2ebbc62@qwiklabs.net"
 
 # Bucket deve ser globalmente unico
-export BUCKET_NAME="qwiklabs-gcp-02-bd5d30d114c0"
+export BUCKET_NAME=$DEVSHELL_PROJECT_ID
 
 # Regiao multirregional de exemplo (ajuste conforme ambiente)
 export BUCKET_LOCATION="US"
@@ -78,7 +78,8 @@ gcloud projects get-iam-policy "$PROJECT_ID" \
 ```bash
 gcloud projects add-iam-policy-binding "$PROJECT_ID" \
 	--member="user:$USERNAME_2" \
-	--role="roles/viewer"
+	--role="roles/viewer" \
+    --condition=None
 ```
 
 ### Explicacao dos parametros
@@ -161,7 +162,8 @@ Remover o papel de visualizacao em nivel de projeto do Username 2 para cortar ac
 ```bash
 gcloud projects remove-iam-policy-binding "$PROJECT_ID" \
 	--member="user:$USERNAME_2" \
-	--role="roles/viewer"
+	--role="roles/viewer" \
+    --condition=None
 ```
 
 2. Validar que binding foi removido:

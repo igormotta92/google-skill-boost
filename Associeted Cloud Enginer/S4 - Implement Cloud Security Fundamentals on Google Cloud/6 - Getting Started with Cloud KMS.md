@@ -27,12 +27,12 @@ Padronizar variaveis reduz erro de digitacao e facilita reaproveitar comandos.
 
 ```bash
 # Projeto ativo
-export PROJECT_ID="$(gcloud config get-value project)"
+export PROJECT_ID=$DEVSHELL_PROJECT_ID
 
-# Bucket do lab (ajuste o prefixo conforme ambiente)
-export BUCKET_NAME="$PROJECT_ID-kms-lab"
+# Bucket do lab (nome sugerido no enunciado: <PROJECT_ID>-kms_lab)
+export BUCKET_NAME="${PROJECT_ID}-kms_lab"
 
-# Dataset de origem disponibilizado pelo lab
+# Dataset de origem disponibilizado pelo lab (gs://${GOOGLE_CLOUD_PROJECT}-kms-lab-data)
 export SOURCE_BUCKET="${PROJECT_ID}-kms-lab-data"
 
 # KMS
@@ -69,21 +69,23 @@ O bucket sera o destino dos arquivos criptografados produzidos no lab.
 ### Passo 1: Criar bucket
 
 ```bash
-gsutil mb "gs://${BUCKET_NAME}"
+gcloud storage buckets create "gs://${BUCKET_NAME}"
 ```
 
 **Explicacao dos parametros:**
-- `gsutil mb`: cria bucket.
+- `gcloud storage buckets create`: cria bucket (substitui o antigo `gsutil mb`).
 - `gs://${BUCKET_NAME}`: nome globalmente unico do bucket.
 
 ### Passo 2: Validar criacao
 
 ```bash
-gsutil ls -b "gs://${BUCKET_NAME}"
+gcloud storage buckets describe "gs://${BUCKET_NAME}" --format="value(name,location)"
 ```
 
 **Resultado esperado:**
-- bucket listado com metadados basicos.
+- bucket listado com nome e localizacao.
+
+> Click **Check my progress**: *Create a Cloud Storage bucket*.
 
 ---
 
@@ -96,7 +98,7 @@ Antes de criptografar, valide que o arquivo de entrada esta em texto puro.
 ### Passo 1: Copiar um arquivo de exemplo
 
 ```bash
-gsutil cp "gs://${SOURCE_BUCKET}/finance-dept/inbox/1.txt" .
+gcloud storage cp "gs://${SOURCE_BUCKET}/finance-dept/inbox/1.txt" .
 ```
 
 ### Passo 2: Inspecionar o conteudo
@@ -106,7 +108,10 @@ tail -n 5 1.txt
 ```
 
 **Resultado esperado:**
-- visualizar texto semelhante a `This is a sample financial document for encryption`.
+
+```text
+Content: This is a sample financial document for encryption (File 1).
+```
 
 ---
 
@@ -168,7 +173,10 @@ gcloud kms keys list --location="${LOCATION}" --keyring="${KEYRING_NAME}"
 ```
 
 **Resultado esperado:**
-- `labkey` e `qwiklab` disponiveis.
+- `labkey` e `qwiklab` disponiveis (tambem visiveis em **Security > Key Management** no Console).
+- KeyRings e CryptoKeys **nao podem ser excluidos** no Cloud KMS.
+
+> Click **Check my progress**: *Create a Keyring and Crypto key*.
 
 ---
 
@@ -187,6 +195,8 @@ PLAINTEXT="$(base64 -w0 1.txt)"
 Nota:
 - em ambientes sem `-w0`, ajuste conforme ambiente usando alternativa equivalente para remover quebra de linha.
 - no fluxo CLI do `gcloud kms encrypt`, esta conversao nao e necessaria, pois o comando aceita `--plaintext-file` diretamente.
+
+> **Atencao - REST x CLI geram formatos diferentes:** o endpoint REST devolve o `ciphertext` em **base64** (texto), enquanto `gcloud kms encrypt` grava o `ciphertext` **binario**. Use o mesmo caminho para encrypt e decrypt do mesmo arquivo. O lab usa o caminho **REST** (`curl` + `jq`); prefira ele para os checks.
 
 ### Passo 2: Chamar endpoint encrypt (teste rapido)
 
@@ -256,11 +266,13 @@ cat 1.decrypted
 ### Passo 5: Enviar arquivo criptografado ao bucket
 
 ```bash
-gsutil cp 1.encrypted "gs://${BUCKET_NAME}/"
+gcloud storage cp 1.encrypted "gs://${BUCKET_NAME}/"
 ```
 
 **Resultado esperado:**
 - `1.encrypted` presente no bucket e decriptacao retornando o conteudo original.
+
+> Click **Check my progress**: *Encrypt Your Data with the Cloud KMS key and upload it on the storage bucket*.
 
 ---
 
@@ -308,6 +320,8 @@ gcloud kms keyrings get-iam-policy "${KEYRING_NAME}" \
 **Resultado esperado:**
 - usuario presente nos dois bindings esperados.
 
+Console (passo do lab): **Security > Key Management** > marque o KeyRing `labkey` > **Add principals** no painel lateral para visualizar contas e permissoes.
+
 ---
 
 ## TAREFA 7: Criptografar multiplos arquivos e enviar ao Cloud Storage
@@ -319,7 +333,7 @@ Automatizar o processo de criptografia para todos os arquivos do diretorio `fina
 ### Passo 1: Baixar diretorio de origem
 
 ```bash
-gsutil -m cp -r "gs://${SOURCE_BUCKET}/finance-dept" .
+gcloud storage cp -r "gs://${SOURCE_BUCKET}/finance-dept" .
 ```
 
 ### Passo 2: Executar loop de criptografia
@@ -357,17 +371,21 @@ done
 ### Passo 3: Enviar arquivos criptografados
 
 ```bash
-gsutil -m cp finance-dept/inbox/*.encrypted "gs://${BUCKET_NAME}/finance-dept/inbox/"
+gcloud storage cp finance-dept/inbox/*.encrypted "gs://${BUCKET_NAME}/finance-dept/inbox/"
 ```
 
 ### Passo 4: Validar upload
 
 ```bash
-gsutil ls "gs://${BUCKET_NAME}/finance-dept/inbox/"
+gcloud storage ls "gs://${BUCKET_NAME}/finance-dept/inbox/"
 ```
 
 **Resultado esperado:**
-- multiplos arquivos `.encrypted` no caminho `finance-dept/inbox` do bucket.
+- multiplos arquivos `.encrypted` no caminho `finance-dept/inbox` do bucket (Console: **Cloud Storage > Buckets > `${BUCKET_NAME}` > finance-dept > inbox**).
+
+> Click **Check my progress**: *Encrypt multiple files using KMS API and upload to Cloud Storage*.
+
+Nota: o Cloud Storage ja oferece Server Side Encryption (inclusive com CMEK), que e o caminho recomendado para criptografar dados no bucket. O fluxo acima e apenas demonstrativo.
 
 ---
 
@@ -381,7 +399,7 @@ Cloud Audit Logs registra quem fez o que, quando e em qual recurso.
 
 ```bash
 gcloud logging read \
-  'resource.type="cloudkms_key_ring"' \
+  'resource.type="cloudkms_keyring"' \
   --limit=20 \
   --format='table(timestamp,protoPayload.methodName,protoPayload.authenticationInfo.principalEmail,resource.labels.key_ring_id)'
 ```
@@ -390,13 +408,23 @@ gcloud logging read \
 
 ```bash
 gcloud logging read \
-  "resource.type=\"cloudkms_key_ring\" AND resource.labels.key_ring_id=\"${KEYRING_NAME}\"" \
+  "resource.type=\"cloudkms_keyring\" AND resource.labels.key_ring_id=\"${KEYRING_NAME}\"" \
   --limit=20 \
   --format='table(timestamp,protoPayload.methodName,protoPayload.resourceName)'
 ```
 
 **Resultado esperado:**
 - eventos de criacao/alteracao/uso do `labkey` visiveis no Log Explorer via CLI.
+
+Console (passo do lab): **Navigation menu > Cloud Overview > Activity** > **View Log Explorer** > Resource Type **Cloud KMS Key Ring**.
+
+---
+
+## TAREFA 9: Teste de conhecimento
+
+> *Cloud KMS is integrated with Cloud IAM and Cloud Audit Logging so that you can manage permissions on individual keys and monitor how these are used.*
+
+**Resposta: True.** O IAM controla quem administra e quem usa cada KeyRing/CryptoKey (Tarefa 6), e o Cloud Audit Logs registra as operacoes sobre eles (Tarefa 8).
 
 ---
 
@@ -406,15 +434,15 @@ Execute os comandos abaixo para confirmar que todos os objetivos foram atendidos
 
 ```bash
 # Bucket criado
-gsutil ls -b "gs://${BUCKET_NAME}"
+gcloud storage buckets describe "gs://${BUCKET_NAME}" --format="value(name,location)"
 
 # KeyRing/CryptoKey criados
 gcloud kms keyrings list --location="${LOCATION}" --filter="name:${KEYRING_NAME}"
 gcloud kms keys list --location="${LOCATION}" --keyring="${KEYRING_NAME}" --filter="name:${CRYPTOKEY_NAME}"
 
 # Arquivos criptografados no bucket
-gsutil ls "gs://${BUCKET_NAME}/"
-gsutil ls "gs://${BUCKET_NAME}/finance-dept/inbox/"
+gcloud storage ls "gs://${BUCKET_NAME}/"
+gcloud storage ls "gs://${BUCKET_NAME}/finance-dept/inbox/"
 
 # IAM aplicado no KeyRing
 gcloud kms keyrings get-iam-policy "${KEYRING_NAME}" --location="${LOCATION}"
@@ -447,10 +475,10 @@ Comandos de limpeza parcial:
 
 ```bash
 # Remover objetos do bucket
-gsutil -m rm -r "gs://${BUCKET_NAME}/**"
+gcloud storage rm -r "gs://${BUCKET_NAME}/**"
 
 # Remover bucket (se vazio)
-gsutil rb "gs://${BUCKET_NAME}"
+gcloud storage buckets delete "gs://${BUCKET_NAME}"
 ```
 
 ---
@@ -474,3 +502,4 @@ gsutil rb "gs://${BUCKET_NAME}"
 6. Conceder IAM (`cloudkms.admin` e `cloudkms.cryptoKeyEncrypterDecrypter`).
 7. Criptografar lote de arquivos e enviar ao bucket.
 8. Consultar logs de auditoria para rastreabilidade.
+9. Responder o quiz (True).
